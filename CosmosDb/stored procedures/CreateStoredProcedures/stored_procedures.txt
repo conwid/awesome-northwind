@@ -1,0 +1,208 @@
+﻿function tenMostExpensiveProducts() {
+    var collection = getContext().getCollection();    
+    var isAccepted = collection.queryDocuments(
+        collection.getSelfLink(),
+        'SELECT c.ProductName, c.UnitPrice FROM c IN data.Products',
+    function (err, feed, options) {
+        if (err) 
+			throw err;
+        if (!feed || !feed.length) {
+            var response = getContext().getResponse();
+            response.setBody('no docs found');
+        }
+        else {
+            var response = getContext().getResponse();   
+            feed.sort(function(a,b) { return b.UnitPrice-a.UnitPrice; });                     
+            response.setBody(JSON.stringify(feed.slice(0,10)));
+        }
+    });
+
+    if (!isAccepted) 
+		throw new Error('The query was not accepted by the server.');
+}
+--------------------------------------------------------------------------------------------
+function custOrdersOrders(customerId) {
+    var collection = getContext().getCollection();
+    
+    var isAccepted = collection.queryDocuments(
+        collection.getSelfLink(),
+        'SELECT o.OrderID, o.OrderDate, o.RequiredDate, o.ShippedDate FROM data nd JOIN o IN nd.Orders WHERE nd.EntityType="Customer" and nd.CustomerID='+customerId,
+    function (err, feed, options) {
+        if (err) 
+			throw err;       
+        if (!feed || !feed.length) {
+            var response = getContext().getResponse();
+            response.setBody('no docs found');
+        }
+        else {
+            var response = getContext().getResponse();            
+            feed.sort(function(a,b) { return a.OrderID-b.OrderID; });
+            response.setBody(JSON.stringify(feed));
+        }
+    });
+
+    if (!isAccepted) 
+		throw new Error('The query was not accepted by the server.');
+}
+--------------------------------------------------------------------------------------------
+function salesByCategory(categoryName, orderYear) {
+    var collection = getContext().getCollection();
+        
+    if (orderYear !='"1996"' && orderYear!='"1997"' && orderYear!='"1998"')
+        orderYear = '"1998"';
+        
+    var isAccepted = collection.queryDocuments(
+        collection.getSelfLink(),        
+        'SELECT VALUE product FROM northwindData JOIN product IN northwindData.Products  WHERE northwindData.EntityType = "Category" and northwindData.CategoryName = '+categoryName,
+    function (err, products) {
+        if (err) 
+			throw err;       
+        if (!products || !products.length) {
+            var response = getContext().getResponse();
+            response.setBody('no products found for the category');
+        }
+        else {                
+            var isInnerAccepted = collection.queryDocuments(
+            collection.getSelfLink(),        
+            'SELECT VALUE od FROM northwindData Join o IN northwindData.Orders JOIN od IN o.OrderDetails where northwindData.EntityType="Customer" and SUBSTRING(o.OrderDate,0,4) ='+orderYear,
+            function (err, orders) {
+                if (err) 
+			        throw err;       
+                if (!orders || !orders.length) {
+                    var response = getContext().getResponse();
+                    response.setBody('no orders found for the year');
+                }
+                else {                                                      
+                    var response = getContext().getResponse();
+                    var elements = {};                    
+                    orders.forEach(o=> {                        
+                        var plusAmount = o.UnitPrice * (1-o.Discount) * o.Quantity;
+                        var pr = products.find(p=>p.ProductID===o.ProductID);
+                        if (pr) { 
+                            if (!(pr.ProductName in elements)) {
+                                elements[pr.ProductName] = plusAmount;
+                            }                        
+                            else {
+                                elements[pr.ProductName] += plusAmount;
+                            }
+                        }
+                    })
+                    for(var key in elements) {
+                        elements[key] = Math.round(elements[key]);
+                    } 
+                    response.setBody(JSON.stringify(elements));                        
+                }
+            });    
+            if (!isInnerAccepted) 
+		        throw new Error('The query was not accepted by the server.');                   
+        }
+    });  
+    if (!isAccepted) 
+		throw new Error('The query was not accepted by the server.');
+}
+--------------------------------------------------------------------------------------------
+function custOrdersDetails(orderId) {
+    var collection = getContext().getCollection();
+                    
+    var isAccepted = collection.queryDocuments(
+        collection.getSelfLink(),        
+        'SELECT VALUE { ProductID: od.ProductID, UnitPrice: Round(od.UnitPrice), Quantity: od.Quantity, Discount:od.Discount*100, ExtendedPrice: Round(od.Quantity*od.UnitPrice*(1-od.Discount))  } FROM northwindData JOIN o IN northwindData.Orders JOIN od IN o.OrderDetails  WHERE northwindData.EntityType = "Customer" and o.OrderID='+orderId,
+    function (err, orderDetails) {
+        if (err) 
+			throw err;       
+        if (!orderDetails || !orderDetails.length) {
+            var response = getContext().getResponse();
+            response.setBody('no data for the order');
+        }
+        else {                
+            var isInnerAccepted = collection.queryDocuments(
+            collection.getSelfLink(),        
+            'SELECT c.ProductName, c.ProductID FROM c IN data.Products',
+            function (err, products) {
+                if (err) 
+			        throw err;       
+
+                orderDetails.forEach(od=> {
+                    od.ProductName = products.find(p=> p.ProductID==od.ProductID).ProductName;
+                    delete od.ProductID;
+                });                                                                                                                             
+                var response = getContext().getResponse();                
+                response.setBody(JSON.stringify(orderDetails));                                        
+            });    
+            if (!isInnerAccepted) 
+		        throw new Error('The query was not accepted by the server.');                   
+        }
+    });  
+    if (!isAccepted) 
+		throw new Error('The query was not accepted by the server.');
+}
+--------------------------------------------------------------------------------------------
+function custOrderHist(customerId) {
+    var collection = getContext().getCollection();
+                    
+    var isAccepted = collection.queryDocuments(
+        collection.getSelfLink(),        
+        'SELECT VALUE od FROM nd JOIN o in nd.Orders JOIN od in o.OrderDetails WHERE nd.EntityType = "Customer" and nd.CustomerID = '+customerId,
+    function (err, orderDetails) {
+        if (err) 
+			throw err;       
+        if (!orderDetails || !orderDetails.length) {
+            var response = getContext().getResponse();
+            response.setBody('no orders for the customer');
+        }
+        else {                
+            var isInnerAccepted = collection.queryDocuments(
+            collection.getSelfLink(),        
+            'SELECT c.ProductName, c.ProductID FROM c IN data.Products',
+            function (err, products) {
+                if (err) 
+			        throw err;       
+                
+                var elements = {};
+                orderDetails.forEach(od=> {
+                    var pr = products.find(p=>p.ProductID==od.ProductID);
+                    if (!(pr.ProductName in elements)) {
+                        elements[pr.ProductName] = od.Quantity;
+                    }
+                    else {
+                        elements[pr.ProductName] += od.Quantity;
+                    }
+                });
+                var response = getContext().getResponse();                
+                response.setBody(JSON.stringify(elements));                                        
+            });    
+            if (!isInnerAccepted) 
+		        throw new Error('The query was not accepted by the server.');                   
+        }
+    });  
+    if (!isAccepted) 
+		throw new Error('The query was not accepted by the server.');
+}
+--------------------------------------------------------------------------------------------
+function salesByYear(beginningDate,endDate) {
+    var collection = getContext().getCollection();
+    
+    collection.queryDocuments(
+        collection.getSelfLink(),
+        'SELECT VALUE { OrderID:o.OrderID, ShippedDate:o.ShippedDate, Year:SUBSTRING(o.ShippedDate,0,4), OrderDetailID:od.OrderDetailID, Discount:od.Discount, UnitPrice:od.UnitPrice, Quantity:od.Quantity } FROM nd JOIN o in nd.Orders JOIN od in o.OrderDetails WHERE nd.EntityType = "Customer" and o.ShippedDate>='+beginningDate+' and o.ShippedDate<='+endDate,
+    function (err, orderDetails) {
+        if (err) 
+            throw err;
+        var subTotals = {};
+        orderDetails.forEach(od=> {
+            var subSubTotal = od.UnitPrice*od.Quantity*(1-od.Discount);
+            if (!(od.OrderID in subTotals)) {
+                subTotals[od.OrderID] = { ShippedDate: od.ShippedDate, OrderID:od.OrderID, SubTotal: subSubTotal, Year:od.Year };
+            }
+            else {
+                subTotals[od.OrderID].SubTotal +=subSubTotal;
+            }
+        });                 
+        var salesByYearData = [];
+        for (var key in subTotals) { 
+            salesByYearData.push(subTotals[key]);
+        }                
+        var response = getContext().getResponse();           
+        response.setBody(JSON.stringify(salesByYearData));        
+    });            
+}
